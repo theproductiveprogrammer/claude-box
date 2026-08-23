@@ -19,6 +19,11 @@ args=(
   --workdir /workspace
   --volume "${VOLUME}:${GUEST_CLAUDE}"
   --env "CLAUDE_CONFIG_DIR=${GUEST_CLAUDE}"
+  # docker run defaults to TERM=xterm (8 colors) and drops COLORTERM, which
+  # leaves Claude Code's highlights washed out and Helix without a visible
+  # cursor. Forward the host's values so the container sees true color.
+  --env "TERM=${TERM:-xterm-256color}"
+  --env "COLORTERM=${COLORTERM:-truecolor}"
 )
 
 # --- Host-authored config, mounted read-only over the volume.
