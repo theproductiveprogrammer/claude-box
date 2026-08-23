@@ -58,7 +58,9 @@ if [ "${1:-}" = "shell" ]; then
   cmd=(bash "$@")
 else
   [ "${1:-}" = "--" ] && shift
-  cmd=(claude --dangerously-skip-permissions "$@")
+  # --mcp-config registers the in-image Playwright (headless Chromium) server
+  # so Claude can take screenshots and drive pages from inside the box.
+  cmd=(claude --dangerously-skip-permissions --mcp-config /opt/claude-box/mcp.json "$@")
 fi
 
 # Tells herdr which screen-detection manifest to use, since it sees `docker`

@@ -65,6 +65,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN npm install -g @anthropic-ai/claude-code
 
+# --- Headless browser for screenshots and page checks.
+# The claude-in-chrome extension lives in the host's Chrome and can't be
+# reached from inside the container, so we ship Playwright's Chromium plus the
+# Playwright MCP server instead. Browsers go under /opt so the node user finds
+# them without a per-user cache; --with-deps pulls in the shared libs Chromium
+# needs on bookworm. The MCP server is wired up by the launcher via
+# --mcp-config /opt/claude-box/mcp.json.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+# Understand: the browser build must come from the Playwright version bundled
+# inside @playwright/mcp, not whatever `npx playwright` resolves to, or the
+# build numbers won't match and launch fails with "Executable doesn't exist".
+RUN npm install -g @playwright/mcp \
+    && node /usr/local/lib/node_modules/@playwright/mcp/node_modules/playwright/cli.js \
+         install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod -R a+rX /opt/ms-playwright
+RUN mkdir -p /opt/claude-box && cat > /opt/claude-box/mcp.json <<'JSON'
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "playwright-mcp",
+      "args": ["--browser", "chromium", "--headless", "--no-sandbox"]
+    }
+  }
+}
+JSON
+
 # --- Helix, from the builder stage.
 COPY --from=helix-builder /opt/helix/bin/hx /usr/local/bin/hx
 COPY --from=helix-builder /opt/helix/runtime /opt/helix/runtime
