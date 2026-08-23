@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# claude-box — run Claude Code in a container, unprompted, scoped to $PWD.
+#
+#   claude-box                 launch Claude Code with permission prompts off
+#   claude-box shell           drop into a shell in the container instead
+#   claude-box -- --continue   pass extra flags through to claude
+#
+set -euo pipefail
+
+IMAGE="${CLAUDE_BOX_IMAGE:-claude-box}"
+VOLUME="${CLAUDE_BOX_VOLUME:-claude-box-config}"
+HOST_CLAUDE="${HOME}/.claude"
+GUEST_CLAUDE="/home/node/.claude"
+
+args=(
+  --rm --interactive --tty
+  --hostname claude-box
+  --volume "${PWD}:/workspace"
+  --workdir /workspace
+  --volume "${VOLUME}:${GUEST_CLAUDE}"
+  --env "CLAUDE_CONFIG_DIR=${GUEST_CLAUDE}"
+)
+
+# --- Host-authored config, mounted read-only over the volume.
+# Docker applies mounts deepest-path-last, so these land on top of the volume
+# rather than being shadowed by it. Read-only means the container can't corrupt
+# the skills and settings you maintain on the host.
+# Only mount paths that actually exist — Docker silently creates a root-owned
+# empty directory for a missing bind source, which then shadows the real thing.
+for item in skills agents commands output-styles settings.json CLAUDE.md; do
+  if [ -e "${HOST_CLAUDE}/${item}" ]; then
+    args+=(--volume "${HOST_CLAUDE}/${item}:${GUEST_CLAUDE}/${item}:ro")
+  fi
+done
+
+# --- Helix config from the host (config.toml, languages.toml, themes).
+# Read-only: edit it on the host, the container picks it up next launch.
+if [ -d "${HOME}/.config/helix" ]; then
+  args+=(--volume "${HOME}/.config/helix:/home/node/.config/helix:ro")
+fi
+
+# --- Auth.
+# Preferred: sign in once inside the container; the token persists in $VOLUME.
+# Alternative: export CLAUDE_CODE_OAUTH_TOKEN=$(claude setup-token) on the host
+# and it gets passed through here.
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  args+=(--env CLAUDE_CODE_OAUTH_TOKEN)
+fi
+
+# --- Optional per-project extras.
+# A .claude-box.env in the project root is passed through as environment.
+if [ -f "${PWD}/.claude-box.env" ]; then
+  args+=(--env-file "${PWD}/.claude-box.env")
+fi
+
+if [ "${1:-}" = "shell" ]; then
+  shift
+  cmd=(bash "$@")
+else
+  [ "${1:-}" = "--" ] && shift
+  cmd=(claude --dangerously-skip-permissions "$@")
+fi
+
+# Tells herdr which screen-detection manifest to use, since it sees `docker`
+# as the pane's foreground process rather than `claude`. Must be set on the
+# host side of the command — herdr can't see it if it's set in the container.
+export HERDR_AGENT=claude
+
+exec docker run "${args[@]}" "${IMAGE}" "${cmd[@]}"
