@@ -38,6 +38,20 @@ for item in skills agents commands output-styles settings.json CLAUDE.md; do
   fi
 done
 
+# --- Symlinked skills.
+# Bind mounts don't follow symlinks, so a skill that's a link to somewhere
+# outside ~/.claude/skills (e.g. a skill kept in its own repo) dangles inside
+# the box and Claude Code silently skips it. Mount each link's real target on
+# top of the skills mount at the same name. Deeper paths mount last, so these
+# land over the parent mount rather than being shadowed by it.
+if [ -d "${HOST_CLAUDE}/skills" ]; then
+  for link in "${HOST_CLAUDE}"/skills/*; do
+    [ -L "$link" ] || continue
+    target="$(cd "$(dirname "$link")" && cd "$(readlink "$link")" 2>/dev/null && pwd -P)" || continue
+    args+=(--volume "${target}:${GUEST_CLAUDE}/skills/$(basename "$link"):ro")
+  done
+fi
+
 # --- Helix config from the host (config.toml, languages.toml, themes).
 # Read-only: edit it on the host, the container picks it up next launch.
 if [ -d "${HOME}/.config/helix" ]; then
@@ -73,4 +87,5 @@ fi
 # host side of the command — herdr can't see it if it's set in the container.
 export HERDR_AGENT=claude
 
+[ -n "${CLAUDE_BOX_DRYRUN:-}" ] && { printf "%s\n" "${args[@]}"; exit 0; }
 exec docker run "${args[@]}" "${IMAGE}" "${cmd[@]}"
