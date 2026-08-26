@@ -24,6 +24,11 @@ args=(
   # cursor. Forward the host's values so the container sees true color.
   --env "TERM=${TERM:-xterm-256color}"
   --env "COLORTERM=${COLORTERM:-truecolor}"
+  # Host networking so servers Claude starts in the box (gocr serve, npm run
+  # dev, ...) are reachable at localhost on the host with no port list to
+  # maintain. Works because OrbStack does real host networking on macOS;
+  # loopback-bound servers like gocr's 127.0.0.1 wouldn't survive -p anyway.
+  --network host
 )
 
 # --- Host-authored config, mounted read-only over the volume.
