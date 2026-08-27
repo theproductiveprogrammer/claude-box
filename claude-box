@@ -57,6 +57,12 @@ if [ -d "${HOST_CLAUDE}/skills" ]; then
   done
 fi
 
+# --- Git identity and global config from the host, read-only.
+# Without these, commits inside the box fail with "please tell me who you
+# are". ~/.config/git carries the global ignore file.
+[ -f "${HOME}/.gitconfig" ] && args+=(--volume "${HOME}/.gitconfig:/home/node/.gitconfig:ro")
+[ -d "${HOME}/.config/git" ] && args+=(--volume "${HOME}/.config/git:/home/node/.config/git:ro")
+
 # --- Helix config from the host (config.toml, languages.toml, themes).
 # Read-only: edit it on the host, the container picks it up next launch.
 if [ -d "${HOME}/.config/helix" ]; then
