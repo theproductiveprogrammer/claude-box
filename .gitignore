@@ -1,1 +1,6 @@
 .*
+
+# Local corporate/network CA certs for the build (see Dockerfile) — never
+# committed, since these are per-user/per-network, not project config.
+certs/*
+!certs/.gitkeep

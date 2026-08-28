@@ -5,6 +5,12 @@
 # =====================================================================
 FROM rust:1-bookworm AS helix-builder
 
+# Extra CA certs for networks that TLS-inspect outbound traffic (corporate
+# proxies, Zscaler, Cloudflare Gateway, etc). Drop *.crt files into ./certs;
+# the directory is empty by default so this is a no-op otherwise.
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+
 ARG HELIX_REPO=https://github.com/theproductiveprogrammer/helix.git
 # Pin to a branch, tag, or commit. Change this to force a rebuild of the layer.
 ARG HELIX_REF=master
@@ -28,6 +34,11 @@ RUN cp -r /src/helix/runtime /opt/helix/runtime
 # Stage 2: the actual container.
 # =====================================================================
 FROM node:22-bookworm
+
+# Extra CA certs for networks that TLS-inspect outbound traffic (see the
+# helix-builder stage above for details).
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
 
 # --- Match the host UID/GID so files written into /workspace aren't root-owned.
 # ONLY NEEDED ON LINUX. Docker Desktop on macOS and Windows maps ownership
