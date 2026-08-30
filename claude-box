@@ -57,6 +57,16 @@ if [ -d "${HOST_CLAUDE}/skills" ]; then
   done
 fi
 
+# --- Scratchpad on the host.
+# Claude Code writes artifacts and working files to /tmp/claude-<uid>/... inside
+# the box, which is container-private and gone on exit. Back it with a host
+# dir so you can open what it makes (open ~/.cache/claude-box/tmp/...) and it
+# survives the container. The uid is 1000 unless the image was built with
+# --build-arg UID on Linux.
+SCRATCH="${CLAUDE_BOX_SCRATCH:-${HOME}/.cache/claude-box/tmp}"
+mkdir -p "${SCRATCH}"
+args+=(--volume "${SCRATCH}:/tmp/claude-${CLAUDE_BOX_UID:-1000}")
+
 # --- Git identity and global config from the host, read-only.
 # Without these, commits inside the box fail with "please tell me who you
 # are". ~/.config/git carries the global ignore file.
