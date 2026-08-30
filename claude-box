@@ -60,10 +60,11 @@ fi
 # --- Scratchpad on the host.
 # Claude Code writes artifacts and working files to /tmp/claude-<uid>/... inside
 # the box, which is container-private and gone on exit. Back it with a host
-# dir so you can open what it makes (open ~/.cache/claude-box/tmp/...) and it
-# survives the container. The uid is 1000 unless the image was built with
-# --build-arg UID on Linux.
-SCRATCH="${CLAUDE_BOX_SCRATCH:-${HOME}/.cache/claude-box/tmp}"
+# dir so you can open what it makes (open /tmp/claude-box/...) and it outlives
+# the container. Kept under /tmp so it's scratch on the host too, cleared on
+# reboot rather than piling up. The uid is 1000 unless the image was built
+# with --build-arg UID on Linux.
+SCRATCH="${CLAUDE_BOX_SCRATCH:-/tmp/claude-box}"
 mkdir -p "${SCRATCH}"
 args+=(--volume "${SCRATCH}:/tmp/claude-${CLAUDE_BOX_UID:-1000}")
 
