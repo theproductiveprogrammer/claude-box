@@ -64,6 +64,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         less \
         ripgrep \
         unzip \
+        # Image tooling — build scripts written on macOS reach for sips, which
+        # doesn't exist on Linux; magick covers the same conversions/resizes.
+        imagemagick \
+        jpegoptim \
+        pngquant \
+        optipng \
+        webp \
         build-essential \
         libbz2-dev \
         libffi-dev \
@@ -73,6 +80,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl-dev \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Debian bookworm ships ImageMagick 6, which has no `magick` entrypoint —
+# only convert/identify/mogrify/etc. Scripts written against IM7 call
+# `magick`, so shim it: dispatch `magick identify ...` to the named tool,
+# and bare `magick in.png out.jpg` to convert.
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      'case "$1" in' \
+      '  convert|identify|mogrify|composite|montage|compare|stream|display|animate|import|conjure) t="$1"; shift; exec "$t" "$@";;' \
+      '  *) exec convert "$@";;' \
+      'esac' > /usr/local/bin/magick \
+    && chmod +x /usr/local/bin/magick
 
 RUN npm install -g @anthropic-ai/claude-code
 
