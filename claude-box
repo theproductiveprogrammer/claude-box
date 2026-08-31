@@ -99,4 +99,4 @@ fi
 export HERDR_AGENT=claude
 
 [ -n "${CLAUDE_BOX_DRYRUN:-}" ] && { printf "%s\n" "${args[@]}"; exit 0; }
-exec docker run "${args[@]}" "${IMAGE}" "${cmd[@]}"
+exec podman run "${args[@]}" "${IMAGE}" "${cmd[@]}"

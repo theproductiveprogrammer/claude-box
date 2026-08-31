@@ -36,9 +36,15 @@ RUN cp -r /src/helix/runtime /opt/helix/runtime
 FROM node:22-bookworm
 
 # Extra CA certs for networks that TLS-inspect outbound traffic (see the
-# helix-builder stage above for details).
+# helix-builder stage above for details). Node/npm ship their own CA bundle
+# and ignore the OS trust store, so update-ca-certificates alone isn't
+# enough here — NODE_EXTRA_CA_CERTS points Node at the same certs too. The
+# bundle file always exists (even empty) so this is a no-op when certs/ is.
 COPY certs/ /usr/local/share/ca-certificates/
-RUN update-ca-certificates
+RUN update-ca-certificates \
+    && cat /usr/local/share/ca-certificates/*.crt > /usr/local/share/ca-certificates/extra-ca-bundle.pem 2>/dev/null; \
+    true
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/extra-ca-bundle.pem
 
 # --- Match the host UID/GID so files written into /workspace aren't root-owned.
 # ONLY NEEDED ON LINUX. Docker Desktop on macOS and Windows maps ownership
@@ -48,6 +54,12 @@ ARG UID=1000
 ARG GID=1000
 
 ARG PYTHON_VERSION=3.12
+
+# Override on networks that block the public npm registry (e.g. a corporate
+# policy requiring an internal Artifactory/Nexus/JFrog mirror):
+# --build-arg NPM_REGISTRY=https://your-mirror/api/npm/npm-virtual/
+ARG NPM_REGISTRY=https://registry.npmjs.org
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
 
 # --- System packages.
 # ripgrep is used by Claude Code's search tooling; the lib*-dev set is only
@@ -74,8 +86,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code
-
 # --- Headless browser for screenshots and page checks.
 # The claude-in-chrome extension lives in the host's Chrome and can't be
 # reached from inside the container, so we ship Playwright's Chromium plus the
@@ -87,7 +97,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 # Understand: the browser build must come from the Playwright version bundled
 # inside @playwright/mcp, not whatever `npx playwright` resolves to, or the
 # build numbers won't match and launch fails with "Executable doesn't exist".
-RUN npm install -g @playwright/mcp \
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc \
+    npm install -g @playwright/mcp \
     && node /usr/local/lib/node_modules/@playwright/mcp/node_modules/playwright/cli.js \
          install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/* \
@@ -139,6 +150,12 @@ ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 # Shims go on PATH ahead of everything so tools resolve in non-login shells
 # too (Claude Code's Bash tool doesn't always give you a login shell).
 ENV PATH=/home/node/.local/share/mise/shims:/home/node/.local/bin:$PATH
+
+# --- Claude Code, via the native installer (same as it's installed on the
+# host) rather than npm. It downloads a self-contained binary straight from
+# claude.ai into ~/.local, so it needs no npm registry access at all and
+# sidesteps npm mirror/auth/caching issues entirely.
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Trust the project config without an interactive prompt, and don't block on
 # confirmations for unattended installs.
