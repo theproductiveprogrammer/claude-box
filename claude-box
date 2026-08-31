@@ -12,6 +12,15 @@ VOLUME="${CLAUDE_BOX_VOLUME:-claude-box-config}"
 HOST_CLAUDE="${HOME}/.claude"
 GUEST_CLAUDE="/home/node/.claude"
 
+# --- Container runtime.
+# Work machines have podman, the Mac has docker via OrbStack. Same CLI surface
+# for everything used here, so just take whichever is installed.
+RUNTIME="${CLAUDE_BOX_RUNTIME:-$(command -v podman || command -v docker || true)}"
+if [ -z "${RUNTIME}" ]; then
+  echo "claude-box: neither podman nor docker found on PATH" >&2
+  exit 1
+fi
+
 args=(
   --rm --interactive --tty
   --hostname claude-box
@@ -26,8 +35,10 @@ args=(
   --env "COLORTERM=${COLORTERM:-truecolor}"
   # Host networking so servers Claude starts in the box (gocr serve, npm run
   # dev, ...) are reachable at localhost on the host with no port list to
-  # maintain. Works because OrbStack does real host networking on macOS;
-  # loopback-bound servers like gocr's 127.0.0.1 wouldn't survive -p anyway.
+  # maintain, and the host's MCP servers are reachable from the box (see
+  # "Host MCP servers" below). Works because OrbStack does real host
+  # networking on macOS; loopback-bound servers like gocr's 127.0.0.1
+  # wouldn't survive -p anyway.
   --network host
 )
 
@@ -68,6 +79,35 @@ SCRATCH="${CLAUDE_BOX_SCRATCH:-/tmp/claude-box}"
 mkdir -p "${SCRATCH}"
 args+=(--volume "${SCRATCH}:/tmp/claude-${CLAUDE_BOX_UID:-1000}")
 
+# --- Host MCP servers.
+# The MCP servers registered on the host (bear, leonardo, ...) live in
+# ~/.claude.json, which stays on the host — the box has its own config in the
+# volume, so it can't see them. Copy their definitions out into a file the box
+# loads via --mcp-config, so whatever you `claude mcp add` on the host is in
+# the box next launch with no list to maintain.
+# Only http/sse servers come across: with --network host their localhost URLs
+# already resolve from inside the box. stdio servers would need their command
+# installed in the image, so they're dropped.
+# Understand: podman on macOS runs containers in a VM, so --network host is
+# the VM's network and the Mac is host.containers.internal, not localhost.
+# Rewrite the URLs in that case. Linux podman and OrbStack docker share the
+# real host network and need no rewrite.
+HOST_MCP="${SCRATCH}/host-mcp.json"
+MCP_HOST="${CLAUDE_BOX_MCP_HOST:-localhost}"
+if [ "${MCP_HOST}" = "localhost" ] && [[ "${RUNTIME}" == *podman* ]] && [ "$(uname -s)" != "Linux" ]; then
+  MCP_HOST="host.containers.internal"
+fi
+if [ -f "${HOME}/.claude.json" ] && command -v jq >/dev/null; then
+  jq --arg host "${MCP_HOST}" '{
+    mcpServers: (.mcpServers // {}
+      | with_entries(select(.value.type == "http" or .value.type == "sse"))
+      | map_values(.url |= sub("^(?<s>https?://)(localhost|127\\.0\\.0\\.1)"; "\(.s)\($host)")))
+  }' "${HOME}/.claude.json" > "${HOST_MCP}"
+else
+  echo '{"mcpServers":{}}' > "${HOST_MCP}"
+fi
+args+=(--volume "${HOST_MCP}:/opt/claude-box/host-mcp.json:ro")
+
 # --- Git identity and global config from the host, read-only.
 # Without these, commits inside the box fail with "please tell me who you
 # are". ~/.config/git carries the global ignore file.
@@ -100,8 +140,10 @@ if [ "${1:-}" = "shell" ]; then
 else
   [ "${1:-}" = "--" ] && shift
   # --mcp-config registers the in-image Playwright (headless Chromium) server
-  # so Claude can take screenshots and drive pages from inside the box.
-  cmd=(claude --dangerously-skip-permissions --mcp-config /opt/claude-box/mcp.json "$@")
+  # so Claude can take screenshots and drive pages from inside the box, plus
+  # the host's MCP servers exported above.
+  cmd=(claude --dangerously-skip-permissions
+       --mcp-config /opt/claude-box/mcp.json /opt/claude-box/host-mcp.json "$@")
 fi
 
 # Tells herdr which screen-detection manifest to use, since it sees `docker`
@@ -109,5 +151,5 @@ fi
 # host side of the command — herdr can't see it if it's set in the container.
 export HERDR_AGENT=claude
 
-[ -n "${CLAUDE_BOX_DRYRUN:-}" ] && { printf "%s\n" "${args[@]}"; exit 0; }
-exec podman run "${args[@]}" "${IMAGE}" "${cmd[@]}"
+[ -n "${CLAUDE_BOX_DRYRUN:-}" ] && { printf "%s\n" "${RUNTIME}" "${args[@]}" "${IMAGE}" "${cmd[@]}"; exit 0; }
+exec "${RUNTIME}" run "${args[@]}" "${IMAGE}" "${cmd[@]}"
