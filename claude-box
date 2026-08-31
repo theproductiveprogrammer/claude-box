@@ -77,6 +77,12 @@ fi
 # with --build-arg UID on Linux.
 SCRATCH="${CLAUDE_BOX_SCRATCH:-/tmp/claude-box}"
 mkdir -p "${SCRATCH}"
+# Resolve symlinks (e.g. macOS's /tmp -> /private/tmp) before handing this to
+# podman: podman machine's VM only shares specific host dirs over virtiofs
+# (/Users, /private, /var/folders) and has its own separate /tmp, so the
+# literal path /tmp/claude-box doesn't resolve inside the VM even though
+# mkdir -p just created it on the host.
+SCRATCH="$(realpath "${SCRATCH}")"
 args+=(--volume "${SCRATCH}:/tmp/claude-${CLAUDE_BOX_UID:-1000}")
 
 # --- Host MCP servers.
