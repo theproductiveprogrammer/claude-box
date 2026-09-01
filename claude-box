@@ -5,6 +5,12 @@
 #   claude-box shell           drop into a shell in the container instead
 #   claude-box -- --continue   pass extra flags through to claude
 #
+# Per-project state lives in ./.claude-box/ (self-gitignored):
+#   node_modules, .venv   the box's own Linux installs, mounted over the
+#                         project's (see "Platform-specific dirs" below)
+#   dirs                  more paths to treat that way, one per line
+#   env                   extra environment for the container
+#
 set -euo pipefail
 
 IMAGE="${CLAUDE_BOX_IMAGE:-claude-box}"
@@ -67,6 +73,46 @@ if [ -d "${HOST_CLAUDE}/skills" ]; then
     args+=(--volume "${target}:${GUEST_CLAUDE}/skills/$(basename "$link"):ro")
   done
 fi
+
+# --- Per-project dir.
+# Everything claude-box keeps for a project lives in ./.claude-box/, so it's
+# obvious where it is and goes away with the project. The dir ignores itself
+# via a .gitignore inside it (git add -f if you ever want dirs committed).
+BOX="${PWD}/.claude-box"
+mkdir -p "${BOX}"
+[ -e "${BOX}/.gitignore" ] || printf '*\n' > "${BOX}/.gitignore"
+
+# --- Platform-specific dirs.
+# The problem is that node_modules and .venv hold binaries built for whichever
+# side ran the install last, so a Linux install from the box breaks the Mac
+# checkout and vice versa. The way we solve this is to mount .claude-box/<dir>
+# on top of each such path, so the box gets its own Linux copy that persists
+# across launches while the host copy underneath is never touched. Deeper
+# paths mount last, so these land over the /workspace mount.
+# Defaults cover node and python; .claude-box/dirs adds more (target, .tox,
+# packages/web/node_modules, ...), one relative path per line, # comments
+# allowed. Safe to rm -rf .claude-box; the box just reinstalls.
+# Understand: the mountpoint is created on the host first so it's owned by you
+# rather than by whatever the runtime creates it as. Empty dirs are invisible
+# to git, so the leftover node_modules/.venv on the host cost nothing.
+mask_dirs=(node_modules .venv)
+if [ -f "${BOX}/dirs" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"; line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+    [ -n "$line" ] && mask_dirs+=("${line#/}")
+  done < "${BOX}/dirs"
+fi
+for dir in "${mask_dirs[@]}"; do
+  dir="${dir%/}"
+  case "$dir" in ""|.|..|../*|*/../*|*/..|.claude-box|.claude-box/*) continue ;; esac
+  mkdir -p "${PWD}/${dir}" "${BOX}/${dir}"
+  args+=(--volume "$(realpath "${BOX}/${dir}"):/workspace/${dir}")
+done
+# Hide .claude-box inside the box: otherwise the same node_modules shows up
+# twice in the tree and crawlers like Jest's haste map complain about
+# duplicate packages. An empty read-only tmpfs over it does the job; nothing
+# in there is needed from inside.
+args+=(--tmpfs /workspace/.claude-box:ro)
 
 # --- Scratchpad on the host.
 # Claude Code writes artifacts and working files to /tmp/claude-<uid>/... inside
@@ -135,9 +181,9 @@ if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
 fi
 
 # --- Optional per-project extras.
-# A .claude-box.env in the project root is passed through as environment.
-if [ -f "${PWD}/.claude-box.env" ]; then
-  args+=(--env-file "${PWD}/.claude-box.env")
+# .claude-box/env is passed through as environment (KEY=value lines).
+if [ -f "${BOX}/env" ]; then
+  args+=(--env-file "${BOX}/env")
 fi
 
 if [ "${1:-}" = "shell" ]; then
