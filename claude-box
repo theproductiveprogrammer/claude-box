@@ -27,11 +27,23 @@ if [ -z "${RUNTIME}" ]; then
   exit 1
 fi
 
+# --- The project, mounted at its real host path.
+# The problem is that mounting every project at /workspace made Claude Code
+# key them all to one project, so memory and session history from different
+# repos landed in the same bucket. The way we solve this is to mount the
+# project at the same path it has on the host, so the box derives the same
+# project key the host does (and paths Claude prints work on the host as-is).
+# realpath: podman machine's VM shares /Users, /private and /var/folders over
+# virtiofs, so a symlinked path like /tmp/x has to be resolved first.
+WORK="$(realpath "${PWD}")"
+
 args=(
   --rm --interactive --tty
   --hostname claude-box
-  --volume "${PWD}:/workspace"
-  --workdir /workspace
+  --volume "${WORK}:${WORK}"
+  --workdir "${WORK}"
+  # The image trusts /workspace; point mise at where the project actually is.
+  --env "MISE_TRUSTED_CONFIG_PATHS=${WORK}"
   --volume "${VOLUME}:${GUEST_CLAUDE}"
   --env "CLAUDE_CONFIG_DIR=${GUEST_CLAUDE}"
   # docker run defaults to TERM=xterm (8 colors) and drops COLORTERM, which
@@ -78,7 +90,7 @@ fi
 # Everything claude-box keeps for a project lives in ./.claude-box/, so it's
 # obvious where it is and goes away with the project. The dir ignores itself
 # via a .gitignore inside it (git add -f if you ever want dirs committed).
-BOX="${PWD}/.claude-box"
+BOX="${WORK}/.claude-box"
 mkdir -p "${BOX}"
 [ -e "${BOX}/.gitignore" ] || printf '*\n' > "${BOX}/.gitignore"
 
@@ -88,7 +100,7 @@ mkdir -p "${BOX}"
 # checkout and vice versa. The way we solve this is to mount .claude-box/<dir>
 # on top of each such path, so the box gets its own Linux copy that persists
 # across launches while the host copy underneath is never touched. Deeper
-# paths mount last, so these land over the /workspace mount.
+# paths mount last, so these land over the project mount.
 # Defaults cover node and python; .claude-box/dirs adds more (target, .tox,
 # packages/web/node_modules, ...), one relative path per line, # comments
 # allowed. Safe to rm -rf .claude-box; the box just reinstalls.
@@ -105,14 +117,14 @@ fi
 for dir in "${mask_dirs[@]}"; do
   dir="${dir%/}"
   case "$dir" in ""|.|..|../*|*/../*|*/..|.claude-box|.claude-box/*) continue ;; esac
-  mkdir -p "${PWD}/${dir}" "${BOX}/${dir}"
-  args+=(--volume "$(realpath "${BOX}/${dir}"):/workspace/${dir}")
+  mkdir -p "${WORK}/${dir}" "${BOX}/${dir}"
+  args+=(--volume "${BOX}/${dir}:${WORK}/${dir}")
 done
 # Hide .claude-box inside the box: otherwise the same node_modules shows up
 # twice in the tree and crawlers like Jest's haste map complain about
 # duplicate packages. An empty read-only tmpfs over it does the job; nothing
 # in there is needed from inside.
-args+=(--tmpfs /workspace/.claude-box:ro)
+args+=(--tmpfs "${WORK}/.claude-box:ro")
 
 # --- Scratchpad on the host.
 # Claude Code writes artifacts and working files to /tmp/claude-<uid>/... inside

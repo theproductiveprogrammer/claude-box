@@ -178,6 +178,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Trust the project config without an interactive prompt, and don't block on
 # confirmations for unattended installs.
+# The claude-box launcher overrides this with the project's real host path.
 ENV MISE_TRUSTED_CONFIG_PATHS=/workspace
 ENV MISE_YES=1
 
