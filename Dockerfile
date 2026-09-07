@@ -38,13 +38,14 @@ FROM node:22-bookworm
 # Extra CA certs for networks that TLS-inspect outbound traffic (see the
 # helix-builder stage above for details). Node/npm ship their own CA bundle
 # and ignore the OS trust store, so update-ca-certificates alone isn't
-# enough here — NODE_EXTRA_CA_CERTS points Node at the same certs too. The
-# bundle file always exists (even empty) so this is a no-op when certs/ is.
+# enough here — NODE_EXTRA_CA_CERTS points Node at the merged OS store,
+# which update-ca-certificates has just folded certs/*.crt into.
+# Understand: don't point this at a bundle built from certs/*.crt alone.
+# With certs/ empty that file is empty, and the Claude Code installer
+# treats an unparseable extra-CA file as fatal ("Invalid CA"), not a warning.
 COPY certs/ /usr/local/share/ca-certificates/
-RUN update-ca-certificates \
-    && cat /usr/local/share/ca-certificates/*.crt > /usr/local/share/ca-certificates/extra-ca-bundle.pem 2>/dev/null; \
-    true
-ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/extra-ca-bundle.pem
+RUN update-ca-certificates
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # --- Match the host UID/GID so files written into /workspace aren't root-owned.
 # ONLY NEEDED ON LINUX. Docker Desktop on macOS and Windows maps ownership
@@ -83,6 +84,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pngquant \
         optipng \
         webp \
+        # Media and document tooling — the things Claude reaches for when a
+        # task involves a video, a PDF, a spreadsheet dump, or a doc format
+        # conversion, so it doesn't stall on "command not found".
+        ffmpeg \
+        libimage-exiftool-perl \
+        poppler-utils \
+        pandoc \
+        sqlite3 \
+        # General CLI conveniences.
+        fd-find \
+        tree \
+        zip \
+        file \
+        rsync \
+        wget \
+        bc \
+        dnsutils \
+        iputils-ping \
         build-essential \
         libbz2-dev \
         libffi-dev \
@@ -92,6 +111,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl-dev \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Debian installs fd as fdfind to dodge a name clash; everyone calls it fd.
+RUN ln -s "$(command -v fdfind)" /usr/local/bin/fd
 
 # Debian bookworm ships ImageMagick 6, which has no `magick` entrypoint —
 # only convert/identify/mogrify/etc. Scripts written against IM7 call
