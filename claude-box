@@ -10,6 +10,8 @@
 #                         project's (see "Platform-specific dirs" below)
 #   dirs                  more paths to treat that way, one per line
 #   env                   extra environment for the container
+#   claude/               the box's Claude Code state for this project:
+#                         memory/ and session transcripts
 #
 set -euo pipefail
 
@@ -125,6 +127,23 @@ done
 # duplicate packages. An empty read-only tmpfs over it does the job; nothing
 # in there is needed from inside.
 args+=(--tmpfs "${WORK}/.claude-box:ro")
+
+# --- Project memory and sessions, visible on the host.
+# The problem is that /memory's "open" action runs the Mac's open command,
+# which doesn't exist in the box, so the memory Claude writes in here is
+# buried in the config volume. The way we solve this is to back the box's
+# per-project Claude Code dir with .claude-box/claude in the project, so
+# `open .claude-box/claude/memory` on the host shows it. Separate from the
+# host Claude's own memory for the project.
+# Claude Code keys projects by path with every non-alphanumeric character
+# turned into "-", same as the host does since the mount uses the real path.
+# Understand: this has to be the whole per-project dir, not just memory/.
+# The runtime creates a missing mountpoint as root, so mounting only memory/ left
+# the parent root-owned and Claude Code couldn't save session transcripts.
+# Mounting the parent itself shadows whatever podman creates underneath.
+PROJECT_KEY="$(printf '%s' "${WORK}" | sed 's/[^A-Za-z0-9]/-/g')"
+mkdir -p "${BOX}/claude"
+args+=(--volume "${BOX}/claude:${GUEST_CLAUDE}/projects/${PROJECT_KEY}")
 
 # --- Scratchpad on the host.
 # Claude Code writes artifacts and working files to /tmp/claude-<uid>/... inside
