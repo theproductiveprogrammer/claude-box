@@ -88,6 +88,16 @@ if [ -d "${HOST_CLAUDE}/skills" ]; then
   done
 fi
 
+# --- Statusline script.
+# The problem is that settings.json's statusLine.command is a hard-coded
+# absolute host path, so mounting settings.json alone leaves the box unable
+# to find the script it points at. The way we solve this is to mount the
+# script at that same absolute path inside the box, same trick as the WORK
+# mount above.
+if [ -f "${HOST_CLAUDE}/claude-statusline.sh" ]; then
+  args+=(--volume "${HOST_CLAUDE}/claude-statusline.sh:${HOST_CLAUDE}/claude-statusline.sh:ro")
+fi
+
 # --- Per-project dir.
 # Everything claude-box keeps for a project lives in ./.claude-box/, so it's
 # obvious where it is and goes away with the project. The dir ignores itself
